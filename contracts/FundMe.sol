@@ -12,7 +12,7 @@ contract FundMe {
     // uint256 MINIMUM_VALUE = 1 * 10 ** 18;   // 1 ETH = 10 ** 18 wei
     // 若用户以USD为单位进行投资呢？利用预言机获取当前ETH通证的市值
     // 单个服务器作为预言机会有单点故障问题（坏了或被攻击）--> 去中心化的预言机网络
-    AggregatorV3Interface internal dataFeed;
+    AggregatorV3Interface public dataFeed;
     uint256 constant MINIMUM_VALUE = 1 * 10 ** 18;    // 表示最少为1美元
 
     uint256 constant TARGET = 5 * 10 ** 18;  // 表示最少为5美元
@@ -26,9 +26,12 @@ contract FundMe {
 
     bool public getFundSuccess = false; // 标注合约是否已完成工作
 
-    constructor(uint256 _lockTime) {
+    event FundWithdrawByOwner(uint256);
+    event RefundByFunder(address, uint256);
+
+    constructor(uint256 _lockTime, address dataFeedAddr) {
         // 使用的是sepolia testnet中 ETH/USD 的price feed合约地址，若使用别的则需要找相应的合约地址
-        dataFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        dataFeed = AggregatorV3Interface(dataFeedAddr);
         owner = msg.sender;
         deployTimestamp = block.timestamp;
         lockTime = _lockTime;
@@ -79,10 +82,14 @@ contract FundMe {
         // 纯转账+其它任务使用call(官方推荐都使用这个)
         // call：transfer ETH with data, return value of function and bool
         bool success;
-        (success, ) = payable (msg.sender).call{value: address(this).balance}("");
+        uint256 balance = address(this).balance;
+        (success, ) = payable (msg.sender).call{value: balance}("");
         require(success, "transfer tx failed");
         fundersToAmount[msg.sender] = 0;    // 这是个细节，但是感觉无用
         getFundSuccess = true;
+
+        // emit event
+        emit FundWithdrawByOwner(balance);
     }
 
     function transferOwnership(address newOwner) public onlyOwner {
@@ -93,9 +100,12 @@ contract FundMe {
         require(convertEthToUSD(address(this).balance) < TARGET, "Target is reached");
         require(fundersToAmount[msg.sender] != 0, "there is no fund for you");
         bool success;
-        (success, ) = payable (msg.sender).call{value: fundersToAmount[msg.sender]}("");
+        uint256 balance = fundersToAmount[msg.sender];
+        (success, ) = payable (msg.sender).call{value: balance}("");
         require(success, "transfer tx failed");
         fundersToAmount[msg.sender] = 0;
+
+        emit RefundByFunder(msg.sender, balance);
     }
 
     function setFunderToAmount(address funder, uint256 amountToUpdate) external {
